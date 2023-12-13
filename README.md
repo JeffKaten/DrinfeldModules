@@ -1,6 +1,6 @@
 # DrinfeldModules
   #IsomorphismClasses
-  There are four functions included:
+  There are four main functions included:
   PicardGroupRepresentatives calculates a list of representatives for the elements of the Picard group of an order in a function field.
   ICM calculates a list of representatives for the elements of the ideal class monoid of an order in a function field.
   MinimalPolynomialOfFrobenius calculates the minimal polynomial of the Frobenius endomorphism of a Drinfeld module over a finite field.
