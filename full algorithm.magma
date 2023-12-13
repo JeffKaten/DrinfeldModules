@@ -1,0 +1,777 @@
+//Calculates the Picard group of an order in a function field
+// A is a polynomial ring over a finite field
+// O is an order in a function field K defined over the fraction
+// field of A by polynomial mm
+function PicardGroupRepresentatives(A,mm,O)
+
+    F<TT>:=FunctionField(Fq);
+    Fx<x>:=PolynomialRing(F);
+    K:=FunctionField(mm);
+    B:=MaximalOrderFinite(K);
+    Bbasis:=Basis(B);
+    rank:=#Basis(O);
+    Om:=RModule(A,rank);
+
+    //ClassGroup (of maximal order)
+    C,m := ClassGroup(B);
+
+    //UnitGroup of B
+    U,uu:=UnitGroup(B);
+
+    //returns generator for O/p
+    function RCFUnitGroupGen(p)
+        r,g:=ResidueClassField(p);
+        return PrimitiveElement(r) @@ g;
+    end function;
+
+    function FreeModuleQuotientReps(M)
+        B,D,C:= SmithForm(M);
+        newbasisastuples:=Rows(C);
+        newbasis:=[Om|];
+        for row in newbasisastuples do
+            Append(~newbasis,Om!row);
+        end for;
+
+        factors:=[**];
+        for i in [1..rank] do
+            Append(~factors,B[i,i]);
+        end for;
+        fullcoefficientlist:=[**];
+        for c in factors do
+            Ac,f:=quo<A|c>;
+            thesecoefficients:=[A|];
+            for ac in Ac do
+                Append(~thesecoefficients,ac@@f);
+            end for;
+            Append(~fullcoefficientlist,thesecoefficients);
+        end for;
+        RR:=[Om|];
+        Append(~RR,Zero(Om));
+        for i in [1..rank] do
+            newRR:=[Om|];
+            for a in RR do
+                for b in fullcoefficientlist[i] do
+                    Append(~newRR,a+(b*(newbasis[i])));
+                end for;
+            end for;
+            RR:=newRR;
+        end for;
+            return RR;
+    end function;
+
+    //returns representatives for 1+p/1+p^m
+    function UnitsCongruentTo1ModP(Oo,p,m)
+        pmat:=BasisMatrix(p);
+        pmmat:=BasisMatrix(p^m);
+        M:= EchelonForm(HorizontalJoin(Transpose(pmat),Transpose(pmmat)));
+        entries:=[A|];
+        for i in [1..rank] do
+            for j in [1..rank] do
+                Append(~entries,Numerator(M[i,j+rank]));
+            end for;
+        end for;
+        Mm:=Matrix(rank,rank,entries);
+        Mm:=Transpose(Mm);
+        coords:= FreeModuleQuotientReps(Mm);
+        reps:=[Oo|];
+        pBasis:=[Oo|];
+        for element in Basis(p) do
+            Append(~pBasis,Oo!element);
+        end for;
+        for element in coords do
+            rep:=Oo!1;
+            for i in [1..rank] do
+                rep:= rep+(element[i]*pBasis[i]);
+            end for;
+            Append(~reps,rep);
+        end for;
+        return reps;
+    end function;
+
+    //function to calculate elements of the unit group of O/p^m for an order O, some prime p, and some integer m
+    function PrimePowerResidueUnitGroupGens(Oo,p,m)
+        firstgen:=RCFUnitGroupGen(p);
+        Mod1Reps:=UnitsCongruentTo1ModP(Oo,p,m);
+        exponent:=#ResidueClassField(p)-1;
+        Opm,ff:=quo<Oo|p^m>;
+        firstgeninquotient:=firstgen@ff;
+        Mod1RepsinQuotientRing:=[Opm|];
+        for rep in Mod1Reps do
+            Append(~Mod1RepsinQuotientRing, rep@ff);
+        end for;
+        RR:=[Oo|];
+        for i in [1..exponent] do
+            for rep in Mod1RepsinQuotientRing do
+                Append(~RR,((firstgeninquotient^i)*rep)@@ff);
+            end for;
+        end for;
+        return RR;
+    end function;
+
+    function CRTList(Oo,ideallist,replists)
+        if #ideallist eq 1 then
+            return replists[1];
+        end if;
+        rr:=#ideallist;
+        I1:=ideallist[rr-1];
+        I2:=ideallist[rr];
+        I:=I1*I2;
+        L:=[Oo|];
+        for rep1 in replists[rr-1] do
+            for rep2 in replists[rr] do
+                Append(~L, CRT(I1,I2,rep1,rep2));
+            end for;
+        end for;
+        Prune(~ideallist);
+        Prune(~ideallist);
+        Append(~ideallist,I);
+        Prune(~replists);
+        Prune(~replists);
+        Append(~replists,L);
+        return CRTList(Oo,ideallist,replists);
+    end function;
+
+    if O eq B then
+        rr:=[**];
+        for element in C do
+            Bideal:=element@m;
+            Append(~rr,Bideal);
+        end for;
+        return rr;
+    end if;
+
+    BasIdeal:=ideal<O|Bbasis>;
+    F:=IdealQuotient(1*O,BasIdeal);
+    Fbasis:=Basis(F);
+    FF:=ideal<B|Fbasis>;
+
+    //Compute the nonregular primes  
+    CondFactorsInB:=Factorization(FF);
+    NonRegularPrimes:=[**];
+    for factor in CondFactorsInB do
+        Append(~NonRegularPrimes,factor[1] meet O);
+    end for;
+    plength := #NonRegularPrimes;
+    for i in [1..plength] do
+        for j in [1..i-1] do
+            if NonRegularPrimes[plength-i+1] eq NonRegularPrimes[j] then
+                Prune(~NonRegularPrimes);
+                break j;
+            end if;
+        end for;
+    end for;
+
+    ///Compute the unit group of B/F where B is the maximal order and F is the conductor of O.
+    listofidealfactors:=[**];
+    unitgroupreps:=[**];
+    for primepowertuple in CondFactorsInB do
+        factor:=primepowertuple[1];
+        power:=primepowertuple[2];
+        Append(~listofidealfactors,factor^power);
+        Append(~unitgroupreps,PrimePowerResidueUnitGroupGens(B,factor,power));
+    end for;
+
+    BFunits:=CRTList(B,listofidealfactors,unitgroupreps);
+
+    //Compute the unit group of O/F within the unit group of B/F
+    BF,gg:=quo<B|FF>;
+    OF,hh:=quo<O|F>;
+    BFUnitsInQuotient:=[BF|];
+    OFUnitsInQuotient:=[BF|];
+
+    for element in BFunits do
+        eg:=element@gg;
+        Append(~BFUnitsInQuotient,eg);
+        if (element in O) and IsUnit(element@hh) then
+            Append(~OFUnitsInQuotient,eg);
+        end if;
+    end for;
+
+
+    //Compute reps for (B/F)*/(O/F)*
+    UnitQuotientReps:=[B|];
+    CosetMap:=AssociativeArray(BF);
+    for element in BFUnitsInQuotient do
+        if not IsDefined(CosetMap,element) then
+            Append(~UnitQuotientReps,element@@gg);
+            for Oelement in OFUnitsInQuotient do
+                CosetMap[Oelement*element]:=element;
+            end for;
+        end if;
+    end for;
+
+    ImageOfBUnits:=[BF|];
+    for element in U do
+        eg:=CosetMap[(element@uu)@gg];
+        if eg notin ImageOfBUnits then
+            Append(~ImageOfBUnits,eg);
+        end if;
+    end for;
+
+    QuotientByBUnits:=[B|];
+    CosetMap2:=AssociativeArray(BF);
+    for element in UnitQuotientReps do
+        if not IsDefined(CosetMap2,element@gg) then
+            Append(~QuotientByBUnits,element);
+            for BUnitImElement in ImageOfBUnits do
+                CosetMap2[CosetMap[BUnitImElement*(element@gg)]]:=element;
+            end for;
+        end if;
+    end for;
+
+    PicardSubset1:=[**];
+    for eg in QuotientByBUnits do
+        element:=eg@@gg;
+        I:=(element*B) meet O;
+        Append(~PicardSubset1,I);
+    end for;
+
+    PicardSubset2:=[**];
+    for element in C do
+        Bideal:=element@m;
+        Append(~PicardSubset2,Bideal meet O);
+    end for;
+
+    PicardG:=[**];
+    for ideal1 in PicardSubset1 do
+        for ideal2 in PicardSubset2 do
+            Append(~PicardG,ideal1*ideal2);
+        end for;
+    end for; 
+    return PicardG;
+end function;
+
+
+//Calculates the Ideal class monoid of an order in a function field
+// A is a polynomial ring over a finite field
+// O is an order in a function field K defined over the fraction
+// field of A by polynomial mm
+function ICM(A,mm,O)
+
+    F<TT>:=FunctionField(Fq);
+    Fx<x>:=PolynomialRing(F);
+    K:=FunctionField(mm);
+    B:=MaximalOrderFinite(K);
+    Bbasis:=Basis(B);
+    rank:=#Basis(O);
+    Om:=RModule(A,rank);
+
+    function MatrixOfSubOrder(Oo)
+        MatEntries:=[A|];
+        for element in Basis(Oo) do
+            elementInB:=Eltseq(B!element);
+            for i in [1..rank] do
+                Append(~MatEntries,elementInB[i]);
+            end for;
+        end for;
+        return Matrix(A,rank,rank,MatEntries);
+    end function;
+
+    function ListOfDivisors(f)
+
+        factortuples:=Factorization(f);
+        divlist:=[A|1];
+        for factortup in factortuples do
+            factor:=factortup[1];
+            power:=factortup[2];
+            newdivlist:=[A|];
+            for element in divlist do
+                for j in [0..power] do
+                    Append(~newdivlist,element*(factor^j));
+                end for;
+            end for;
+            divlist:=newdivlist;
+        end for;
+        return divlist;
+    end function;
+
+    //return list of over-orders of an order Oo
+    function OverOrders(Oo)
+        M:=MatrixOfSubOrder(Oo);
+        OverOrdList:=[**];
+        N,D,C:= SmithForm(M);
+        newbasisastuples:=Rows(C);
+        newbasis:=[B|];
+        for row in newbasisastuples do
+            newbasiselt:=Zero(B);
+            for i in [1..rank] do
+                newbasiselt:=newbasiselt+row[i]*Basis(B)[i];
+            end for;
+            Append(~newbasis,newbasiselt);
+        end for;
+
+        factors:=[**];
+        for i in [1..rank] do
+            Append(~factors,N[i,i]);
+        end for;
+      
+        DiagonalsList:=[*[A|]*];
+        for j in [1..rank] do
+            c:=factors[j];
+            Newdiaglist:=[**];
+            for divisor in ListOfDivisors(c) do
+                for diag in DiagonalsList do
+                    newrep:=Append(diag,divisor);
+                    Append(~Newdiaglist,newrep);
+                end for;
+            end for;
+            DiagonalsList:=Newdiaglist;
+        end for;
+        
+        for diag in DiagonalsList do
+            MatList:=[* [**] *];
+            for i in [1..rank] do
+                newMatList:=[**];
+                init:=[A|];
+                for j in [1..(i-1)] do
+                    Append(~init,Zero(A));
+                end for;
+                dd:=diag[i];
+                Append(~init,dd);
+                if dd eq factors[i] then
+                    for j in [i+1 .. rank] do
+                        Append(~init,Zero(A));
+                    end for;
+                    for k in [1..#MatList] do
+                        Append(~MatList[k], init);
+                    end for; 
+                else
+
+                    RowBuilds:=[*init*];
+                    for j in [i+1 .. rank] do
+                        quot,gg:=quo<A|diag[j]>;
+                        newRowBuilds:=[**];
+                        for element in quot do
+                            for row in RowBuilds do
+
+                                Append(~newRowBuilds, Append(row,element@@gg));
+                            end for;
+                        end for;
+                        RowBuilds:=newRowBuilds;
+
+                    end for;
+
+                    for k in [1..#MatList] do
+                        for row in RowBuilds do
+
+                            Append(~newMatList, Append(MatList[k],row));
+
+                        end for;
+                        
+                    end for;
+                    MatList:=newMatList;
+                end if;
+            end for;
+            
+            for mat in MatList do
+
+                BasisSeq:=[B|];
+                for row in mat do
+
+                    Append(~BasisSeq,B!row);
+
+                end for;
+                thisIdeal:=ideal<Oo|BasisSeq>;
+                if (thisIdeal*thisIdeal eq thisIdeal) and ((1*Oo meet thisIdeal) eq 1*Oo) then
+
+                    add:= true;
+                    for ord in OverOrdList do
+
+                        if ord eq thisIdeal then
+                            add:=false;
+                        end if;
+
+
+                    end for;
+                    if add then
+                        Append(~OverOrdList,thisIdeal);
+                    end if;
+                end if;
+            end for;
+
+
+        end for;
+
+        OverOrdListAsOrders:=[**];
+        for ord in OverOrdList do
+
+            Append(~OverOrdListAsOrders,Order(Oo,Basis(ord)));
+
+        end for;
+
+        return OverOrdListAsOrders;
+    end function;
+
+    //return the trace dual ideal of an ideal I
+    function TraceDualIdeal(I)
+
+        Oo:=Order(I);
+        Bas:=Basis(I);
+        n:=rank;
+        M:=MatrixRing(F, n)![Trace(Bas[i]*Bas[j]): i, j in [1..n] ];
+        MM:=M^-1;
+        dualidealgens:=[&+[ (MM[i,j]*Bas[j]): j in [1..n]] : i in [1..n]] ;
+        return ideal<Oo|dualidealgens>;
+    end function;
+
+    //ideal quotient using trace dual ideal
+    function IdQuo(I,J)
+
+        return(TraceDualIdeal(TraceDualIdeal(I)*J));
+    end function;
+
+    //Return true if two ideals are weakly equivalent, false otherwise.
+    function WeaklyEquivalent(I,J)
+
+        if 1 in (IdQuo(I,J)*IdQuo(J,I)) then
+            return true;
+        else
+            return false;
+        end if;
+    end function;
+
+    //Return all ideals between Oo and ff
+    function OverIdeals(Oo,ff)
+
+        O0:=Order(ff);
+        MatEntries:=[A|];
+        for element in Basis(ff) do
+            elementInOo:=Eltseq(Oo!element);
+            for i in [1..rank] do
+                Append(~MatEntries,elementInOo[i]);
+            end for;
+        end for;
+        M:= Matrix(A,rank,rank,MatEntries);
+
+        OverIdList:=[**];
+        N,D,C:= SmithForm(M);
+        newbasisastuples:=Rows(C);
+        newbasis:=[Oo|];
+        for row in newbasisastuples do
+            newbasiselt:=Zero(Oo);
+            for i in [1..rank] do
+                newbasiselt:=newbasiselt+row[i]*Basis(Oo)[i];
+            end for;
+            Append(~newbasis,newbasiselt);
+        end for;
+
+        factors:=[**];
+        for i in [1..rank] do
+            Append(~factors,N[i,i]);
+        end for;
+      
+        DiagonalsList:=[*[A|]*];
+        for j in [1..rank] do
+            c:=factors[j];
+            Newdiaglist:=[**];
+            for divisor in ListOfDivisors(c) do
+                for diag in DiagonalsList do
+                    newrep:=Append(diag,divisor);
+                    Append(~Newdiaglist,newrep);
+                end for;
+            end for;
+            DiagonalsList:=Newdiaglist;
+        end for;
+        
+        for diag in DiagonalsList do
+            MatList:=[* [**] *];
+            for i in [1..rank] do
+                newMatList:=[**];
+                init:=[A|];
+                for j in [1..(i-1)] do
+                    Append(~init,Zero(A));
+                end for;
+                dd:=diag[i];
+                Append(~init,dd);
+                if dd eq factors[i] then
+                    for j in [i+1 .. rank] do
+                        Append(~init,Zero(A));
+                    end for;
+                    for k in [1..#MatList] do
+                        Append(~MatList[k], init);
+                    end for; 
+                else
+
+                    RowBuilds:=[*init*];
+                    for j in [i+1 .. rank] do
+                        quot,gg:=quo<A|diag[j]>;
+                        newRowBuilds:=[**];
+                        for element in quot do
+                            for row in RowBuilds do
+
+                                Append(~newRowBuilds, Append(row,element@@gg));
+                            end for;
+                        end for;
+                        RowBuilds:=newRowBuilds;
+
+                    end for;
+
+                    for k in [1..#MatList] do
+                        for row in RowBuilds do
+
+                            Append(~newMatList, Append(MatList[k],row));
+
+                        end for;
+                        
+                    end for;
+                    MatList:=newMatList;
+                end if;
+            end for;
+            
+            for mat in MatList do
+
+                BasisSeq:=[Oo|];
+                for row in mat do
+
+                    Append(~BasisSeq,Oo!row);
+
+                end for;
+                thisIdeal:=ideal<O0|BasisSeq>;
+                if ((ff meet thisIdeal) eq ff) then
+
+                    add:= true;
+                    for id in OverIdList do
+
+                        if id eq thisIdeal then
+                            add:=false;
+                        end if;
+                    end for;
+                    if add then
+                        Append(~OverIdList,thisIdeal);
+                    end if;
+                end if;
+            end for;
+
+
+        end for;
+
+        return OverIdList;
+    end function;
+
+    //Return the weak equivalence classes of Oo ideals with multiplicator
+    //ring SS
+    function WeakEquivalenceClasses(Ss,Oo)
+
+        Bas:=Basis(Ss);
+        SsI:=ideal<O|Bas>;
+        Sst:=TraceDualIdeal(SsI);
+        Lw:=[**];
+        if 1 in Sst*IdQuo(SsI,Sst) then
+            Append(~Lw,SsI);
+        else
+
+            OverOrds:=OverOrders(Ss);
+            for overord in OverOrds do
+                Tt:=overord;
+                TtI:=ideal<O|Basis(Tt)>;
+                if 1 in Sst*TtI*IdQuo(TtI,(Sst*TtI)) then
+                    break;
+                end if;
+            end for;
+            ff:=ideal<Oo|Basis(IdQuo(SsI,TtI))>;
+            for II in OverIdeals(Tt,ff) do
+                IIS:=ideal<Oo|Basis(II)>;
+                add:=true;
+                if (IdQuo(IIS,IIS) ne SsI) then
+                    add:=false;
+                end if;
+                for JJ in Lw do
+                    if WeaklyEquivalent(IIS,JJ) then
+                        add:=false;
+                        break;
+                    end if;
+                end for;
+                if add then
+                    Append(~Lw,IIS);
+                end if;
+
+            end for;
+            
+        end if;
+        return Lw;
+    end function;
+
+    //Calculate reps of Ideal class monoid of Oo
+    function ICMonoid(Oo)
+
+        OverOrds:=OverOrders(Oo);
+        Liso:=[**];
+        for Ss in OverOrds do
+
+            Ws:=WeakEquivalenceClasses(Ss,Oo);
+            LiS:=PicardGroupRepresentatives(A,mm,Ss);
+            for I in Ws do
+                for J in LiS do
+
+                    fracideal:= I*ideal<Oo|Basis(J)>;
+                    Append(~Liso,Denominator(fracideal)*fracideal);
+
+                end for;
+            end for;
+
+        end for;
+
+        return Liso;
+    end function;
+
+    return ICMonoid(O);
+
+end function;
+
+//given a polynomial ring A = F_q[T] and a Drinfeld Module A->F_q^n{tau}
+//mapping T to phi, return the minimal polynomial of the Frobenius 
+//endomorphism
+function MinimalPolynomialOfFrobenius(Fq,A,n,phi)
+    
+    k:=GF(q^n);
+    V,v:=VectorSpace(k,Fq);
+    Ax<x> := PolynomialRing(A);
+    
+    r:=Degree(phi);
+    Q:=[Fq|];
+
+    for i in [0..n] do
+        j:=0;
+        for coeff in Eltseq(phi^i) do
+            for ii in [1..n] do
+                Append(~Q,v(coeff)[ii]);
+                j:=j+1;
+            end for;
+            
+        end for;
+        while j lt r*n^2+n do
+            Append(~Q,Zero(Fq));
+            j:=j+1;
+        end while;
+    end for;
+    N:=Transpose(Matrix(Fq,n+1,r*n^2+n,Q));
+    
+    dd:=n;
+    M:=ExtractBlock(N,1,1,r*n^2+n,dd+1);
+    for i in [1..r] do
+        dd:=Floor(n*(r-i)/r);
+        M:=HorizontalJoin(M,VerticalJoin(ZeroMatrix(Fq,n^2*i,dd+1),ExtractBlock(N,1,1,r*n^2+n-n^2*i,dd+1)));
+    end for;
+
+    B:=Basis(NullSpace(Transpose(M)));
+    polylist:=[Ax|];
+    for b in B do
+        a:=Zero(Ax);
+        c:=1;
+        for i in [0..r] do
+            dd:=Floor(n*(r-i)/r);
+            for j in [0..dd] do
+                a:=a+b[c]*T^j*x^i;
+                c:=c+1;
+            end for;
+        end for;
+        Append(~polylist,a);
+    end for;
+   
+    return GCD(polylist);
+
+end function;
+
+//given a polynomial ring A = F_q[T] and a Drinfeld module A->F_q^n{tau}
+//mapping T to phi, return a set of elements in F_q^n{tau} which represent
+//the image of T for each of a set of unique representatives for the 
+//elements of the isomorphism classes in the isogeny class of the input DM.
+//If the endomorphism ring of phi is not minimal, return false.
+function IsomorphismClasses(Fq,A,pp,n,phi)
+
+    d:=Degree(pp);
+    k:=GF(q^n);
+    V,v:=VectorSpace(k,Fq);
+    F<TT> :=FunctionField(Fq);
+    Ax<x> := PolynomialRing(A);
+    mm:=MinimalPolynomialOfFrobenius(Fq,A,n,phi);
+    K:= FunctionField(mm);
+    O:=EquationOrderFinite(K);
+    rank:=#Basis(O);
+    kX<X>:=PolynomialRing(k);
+    t:=Roots(Evaluate(pp,X))[1][1];
+    alpha:=Roots(X^2+X+1)[1][1];
+    ktau<tau>:=TwistedPolynomials(k);
+    coeffmap:=hom<Fq -> k | >;
+
+    function Phi(ff,phi)
+
+        coords:=Eltseq(ff);
+        twistedf:=Zero(ktau);
+        for i in [1..#coords] do
+            a:=Eltseq(A!coords[i]);
+            for j in [1..#a] do
+                coeff:=coeffmap(a[j]);
+                twistedf:=twistedf+coeff*phi^(j-1)*tau^((i-1)*n);
+            end for;
+
+        end for;
+        return twistedf;
+
+    end function;
+
+    //return generator of k{tau}I for some ideal I of the endomorphism
+    //ring of phi.
+    function TwistedGenerator(I,phi)
+
+        Bas:=Basis(I);
+        mygen:=Phi(Bas[1],phi);
+        for basel in Bas do
+            mygen:=GCD(mygen,Phi(basel,phi));
+        end for;
+
+        return mygen;
+
+    end function;
+
+    //return the image of T under the Drinfeld module I*phi
+    //for some ideal I of End(phi)
+    function Istar(I,phi)
+
+        mygen:=TwistedGenerator(I,phi);
+        quotient,remainder := Quotrem(mygen*phi, mygen);
+        return quotient;
+
+    end function;
+
+    //if End(phi) = A[pi] return true, else return false.
+    function IsEndomorphismRingMinimal(phi)
+
+        disc:=Discriminant(mm);
+        denlist:=PrimeDivisors(A!disc);
+        for den in denlist do
+            numfactors:= Factorization(mm mod den);
+            numlist:=[Ax|];
+
+            for factor in numfactors do
+
+                pp:=(mm mod den)/factor[1];
+                Append(~numlist,pp);
+
+            end for;
+
+            for num in numlist do
+
+                Q,R:= Quotrem(Phi(num,phi), Phi(K!den,phi));
+                if R eq Zero(ktau) then
+                    return false;
+                end if;
+            end for;
+
+        end for;
+        return true;
+
+    end function;
+
+    if not IsEndomorphismRingMinimal(phi) then
+        return false;
+    end if; 
+
+    icm:=ICM(A,mm,O);
+    res:=[**];
+    for ideal in icm do
+        Append(~res,Istar(ideal,phi));
+    end for;
+    return res;
+
+end function;
